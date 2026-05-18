@@ -30,6 +30,13 @@ class KrbRelayxConfig(NTLMRelayxConfig):
         # Custom options
         self.victim = None
 
+        # Admin service attack
+        self.isADMINAttack = False
+        self.sccmAdminToken = None # internal storage var; not a CLI flag option
+        self.logonname = None
+        self.displayname = None
+        self.objectsid = None
+
     # Make sure we have a fixed version of this to avoid incompatibilities with impacket
     def setLDAPOptions(self, dumpdomain, addda, aclattack, validateprivs, escalateuser, addcomputer, delegateaccess, dumplaps, dumpgmsa, dumpadcs, sid):
         self.dumpdomain = dumpdomain

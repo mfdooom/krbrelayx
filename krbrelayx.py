@@ -91,6 +91,7 @@ def main():
             c.setKrbOptions(options.format, options.victim)
             c.setIsADCSAttack(options.adcs)
             c.setADCSOptions(options.template)
+            c.setisADMINAttack(options.adminservice, options.logonname, options.displayname, options.objectsid)
 
             #If the redirect option is set, configure the HTTP server to redirect targets to SMB
             if server is HTTPKrbRelayServer and options.r is not None:
@@ -179,6 +180,13 @@ def main():
     ldapoptions.add_argument('--dump-gmsa', action='store_true', required=False, help='Attempt to dump any gMSA passwords readable by the user')
     ldapoptions.add_argument('--dump-adcs', action='store_true', required=False, help='Attempt to dump ADCS enrollment services and certificate templates info')
 
+
+    # SCCM option
+    adminoptions = parser.add_argument_group("SCCM AdminService attack options")
+    adminoptions.add_argument('--adminservice', action='store_true', required=False, help="Enable SCCM AdminService relay attack")
+    adminoptions.add_argument('--logonname', action='store', required=False, help="Logon name of the account to be added as an admin")
+    adminoptions.add_argument('--displayname', action='store', required=False, help="Display name name of the account to be added as an admin")
+    adminoptions.add_argument('--objectsid', action='store', required=False, help="SID of the account to be added as an admin")
     # AD CS options
     adcsoptions = parser.add_argument_group("AD CS attack options")
     adcsoptions.add_argument('--adcs', action='store_true', required=False, help='Enable AD CS relay attack')
