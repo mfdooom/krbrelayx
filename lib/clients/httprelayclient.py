@@ -53,7 +53,7 @@ class HTTPRelayClient(ProtocolClient):
         return self.doInitialActions(authdata, kdc)
 
     def doInitialActions(self, authdata, kdc=None):
-        self.session.request('GET', self.path)
+        # self.session.request('GET', self.path)
         res = self.session.getresponse()
         res.read()
         if res.status != 401:
@@ -82,7 +82,7 @@ class HTTPRelayClient(ProtocolClient):
             krbauth = build_apreq(authdata['domain'], kdc, authdata['tgt'], authdata['username'], 'http', self.targetHost)
             negotiate = base64.b64encode(krbauth).decode("ascii")
 
-        headers = {'Authorization':'%s %s' % (self.authenticationMethod, negotiate)}
+        headers = {'Authorization':'%s %s ' % (self.authenticationMethod, negotiate)}
         self.session.request('GET', self.path ,headers=headers)
         res = self.session.getresponse()
         res.read()

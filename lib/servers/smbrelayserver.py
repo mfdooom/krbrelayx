@@ -561,6 +561,7 @@ class SMBRelayServer(Thread):
         for target in self.config.target.originalTargets:
             parsed_target = target
             if parsed_target.scheme.upper() in self.config.attacks:
+            #if True:
                 client = self.config.protocolClients[target.scheme.upper()](self.config, parsed_target)
                 client.initConnection(authdata, self.config.dcip)
                 # We have an attack.. go for it
@@ -576,6 +577,7 @@ class SMBRelayServer(Thread):
         for target in self.config.target.originalTargets:
             parsed_target = target
             if host.lower() in parsed_target.hostname.lower():
+            #if True:
                 # Found a target with the same SPN
                 client = self.config.protocolClients[target.scheme.upper()](self.config, parsed_target)
                 if not client.initConnection(authdata, self.config.dcip):
